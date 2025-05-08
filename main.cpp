@@ -3,23 +3,13 @@
 #include <vector>
 #include <ctime>
 #include <cstdlib>
-#include <stack>
 
 using namespace sf;
 using namespace std;
 
 const int CELL_SIZE = 40;
-const int ROWS = 7;
-const int COLS = 7;
-
-struct Cell
-{
-    bool top = true, right = true, bottom = true, left = true;
-    bool visited = false;
-};
-
-vector<vector<Cell>> maze(ROWS, vector<Cell>(COLS));
-vector<vector<Cell>> discoveredMaze(ROWS, vector<Cell>(COLS));
+const int ROWS = 10;
+const int COLS = 10;
 
 enum Direction
 {
@@ -29,90 +19,76 @@ enum Direction
     WEST
 };
 
+struct Cell
+{
+    bool top = true, right = true, bottom = true, left = true;
+    bool visited = false;
+};
+
+// True maze and discovered maze
+static vector<vector<Cell>> maze;
+static vector<vector<Cell>> discoveredMaze;
+
+// DFS stack for exploration
+static vector<pair<int, int>> pathStack;
+
+// Movement deltas
 int dx[] = {0, 1, 0, -1};
 int dy[] = {-1, 0, 1, 0};
 
+Direction leftOf(Direction d) { return Direction((d + 3) % 4); }
+Direction rightOf(Direction d) { return Direction((d + 1) % 4); }
+Direction behind(Direction d) { return Direction((d + 2) % 4); }
 int simX = 1, simY = 1;
 Direction simDir = SOUTH;
 bool autoMode = false;
-
-Direction leftOf(Direction d) { return static_cast<Direction>((d + 3) % 4); }
-Direction rightOf(Direction d) { return static_cast<Direction>((d + 1) % 4); }
-Direction behind(Direction d) { return static_cast<Direction>((d + 2) % 4); }
-
-bool wallAt(int x, int y, Direction dir)
+bool inBounds(int x, int y)
 {
-    if (x < 0 || y < 0 || x >= COLS || y >= ROWS)
+    return x >= 0 && y >= 0 && x < COLS && y < ROWS;
+}
+
+bool wallAt(int x, int y, Direction d)
+{
+    if (!inBounds(x, y))
         return true;
-    if (dir == NORTH)
-        return maze[y][x].top;
-    if (dir == EAST)
-        return maze[y][x].right;
-    if (dir == SOUTH)
-        return maze[y][x].bottom;
-    if (dir == WEST)
-        return maze[y][x].left;
+    const Cell &c = maze[y][x];
+    switch (d)
+    {
+    case NORTH:
+        return c.top;
+    case EAST:
+        return c.right;
+    case SOUTH:
+        return c.bottom;
+    case WEST:
+        return c.left;
+    }
     return true;
 }
 
-void getData(int x, int y, Direction dir)
+// Sense walls and mark visited
+void getData(int x, int y)
 {
     discoveredMaze[y][x].top = wallAt(x, y, NORTH);
     discoveredMaze[y][x].right = wallAt(x, y, EAST);
     discoveredMaze[y][x].bottom = wallAt(x, y, SOUTH);
     discoveredMaze[y][x].left = wallAt(x, y, WEST);
+    discoveredMaze[y][x].visited = true;
 }
 
-void simulateStep()
+// Minimal-turn command
+void turnTo(Direction &dir, Direction target)
 {
-    if (simX == COLS - 2 && simY == ROWS - 2)
-    {
-        cout << "Maze Completed!" << endl;
-        return;
-    }
-
-    getData(simX, simY, simDir);
-
-    Direction left = leftOf(simDir);
-    Direction right = rightOf(simDir);
-    Direction back = behind(simDir);
-
-    int lx = simX + dx[left];
-    int ly = simY + dy[left];
-    int fx = simX + dx[simDir];
-    int fy = simY + dy[simDir];
-    int rx = simX + dx[right];
-    int ry = simY + dy[right];
-    int bx = simX + dx[back];
-    int by = simY + dy[back];
-
-    if (!wallAt(simX, simY, left) && !discoveredMaze[ly][lx].visited)
-    {
-        simDir = left;
-    }
-    else if (!wallAt(simX, simY, simDir) && !discoveredMaze[fy][fx].visited)
-    {
-        // keep direction
-    }
-    else if (!wallAt(simX, simY, right) && !discoveredMaze[ry][rx].visited)
-    {
-        simDir = right;
-    }
-    else if (!wallAt(simX, simY, back))
-    {
-        simDir = back;
-    }
-    else
-    {
-        // stuck
-        return;
-    }
-
-    simX += dx[simDir];
-    simY += dy[simDir];
-    discoveredMaze[simY][simX].visited = true;
+    int diff = (target - dir + 4) % 4;
+    if (diff == 3)
+        dir = leftOf(dir);
+    else if (diff == 1)
+        dir = rightOf(dir);
+    else if (diff == 2)
+        dir = behind(dir);
 }
 
+// Draw the maze and exploration state
 void drawMaze(RenderWindow &window)
 {
     for (int y = 0; y < ROWS; ++y)
@@ -125,7 +101,7 @@ void drawMaze(RenderWindow &window)
             cell.setOutlineColor(Color::Black);
             cell.setOutlineThickness(1);
             window.draw(cell);
-
+            // walls...
             if (maze[y][x].top)
             {
                 RectangleShape wall(Vector2f(CELL_SIZE, 2));
@@ -156,43 +132,34 @@ void drawMaze(RenderWindow &window)
             }
         }
     }
-
+    // start
     CircleShape start(CELL_SIZE / 4);
     start.setFillColor(Color::Green);
     start.setPosition(1 * CELL_SIZE + CELL_SIZE / 4, 1 * CELL_SIZE + CELL_SIZE / 4);
     window.draw(start);
-
+    // goal
     CircleShape goal(CELL_SIZE / 4);
     goal.setFillColor(Color::Blue);
     goal.setPosition((COLS - 2) * CELL_SIZE + CELL_SIZE / 4, (ROWS - 2) * CELL_SIZE + CELL_SIZE / 4);
     window.draw(goal);
-
+    // robot
     CircleShape robot(CELL_SIZE / 4);
     robot.setFillColor(Color::Red);
     robot.setPosition(simX * CELL_SIZE + CELL_SIZE / 4, simY * CELL_SIZE + CELL_SIZE / 4);
     window.draw(robot);
 }
 
-bool inBounds(int x, int y)
+// Maze generation DFS
+void generateMazeDFS(int x, int y, vector<vector<bool>> &vis)
 {
-    return x >= 0 && y >= 0 && x < COLS && y < ROWS;
-}
-
-void generateMazeDFS(int x, int y, vector<vector<bool>> &visited)
-{
-    visited[y][x] = true;
-
+    vis[y][x] = true;
     vector<Direction> dirs = {NORTH, EAST, SOUTH, WEST};
     random_shuffle(dirs.begin(), dirs.end());
-
     for (Direction d : dirs)
     {
-        int nx = x + dx[d];
-        int ny = y + dy[d];
-
-        if (inBounds(nx, ny) && !visited[ny][nx])
+        int nx = x + dx[d], ny = y + dy[d];
+        if (inBounds(nx, ny) && !vis[ny][nx])
         {
-            // remove wall between (x,y) and (nx,ny)
             if (d == NORTH)
             {
                 maze[y][x].top = false;
@@ -213,80 +180,116 @@ void generateMazeDFS(int x, int y, vector<vector<bool>> &visited)
                 maze[y][x].left = false;
                 maze[ny][nx].right = false;
             }
-            generateMazeDFS(nx, ny, visited);
+            generateMazeDFS(nx, ny, vis);
         }
     }
 }
 
+// Create a new random maze
 void generateRandomMaze()
 {
-    maze = vector<vector<Cell>>(ROWS, vector<Cell>(COLS));
-    vector<vector<bool>> visited(ROWS, vector<bool>(COLS, false));
-
-    for (int i = 0; i < COLS; ++i)
-    {
-        maze[0][i].top = true;
-        maze[ROWS - 1][i].bottom = true;
-    }
-    for (int i = 0; i < ROWS; ++i)
-    {
-        maze[i][0].left = true;
-        maze[i][COLS - 1].right = true;
-    }
-
-    generateMazeDFS(1, 1, visited);
+    maze.assign(ROWS, vector<Cell>(COLS));
+    vector<vector<bool>> vis(ROWS, vector<bool>(COLS, false));
+    generateMazeDFS(1, 1, vis);
 }
 
+// Reset simulation and DFS stack
 void resetSim()
 {
     simX = 1;
     simY = 1;
     simDir = SOUTH;
     autoMode = false;
-    discoveredMaze = vector<vector<Cell>>(ROWS, vector<Cell>(COLS));
+    discoveredMaze.assign(ROWS, vector<Cell>(COLS));
+    pathStack.clear();
+    pathStack.emplace_back(simX, simY);
     discoveredMaze[simY][simX].visited = true;
+}
+
+// Step: explore then backtrack via stack
+void simulateStep()
+{
+    if (simX == COLS - 2 && simY == ROWS - 2)
+    {
+        cout << "Maze Completed!" << endl;
+        return;
+    }
+    getData(simX, simY);
+    // try left, straight, right
+    Direction tryDirs[3] = {leftOf(simDir), simDir, rightOf(simDir)};
+    for (Direction d : tryDirs)
+    {
+        int nx = simX + dx[d], ny = simY + dy[d];
+        if (!wallAt(simX, simY, d) && !discoveredMaze[ny][nx].visited)
+        {
+            pathStack.emplace_back(simX, simY);
+            turnTo(simDir, d);
+            simX = nx;
+            simY = ny;
+            discoveredMaze[simY][simX].visited = true;
+            return;
+        }
+    }
+    // backtrack if dead end
+    if (pathStack.size() > 1)
+    {
+        auto [px, py] = pathStack.back();
+        pathStack.pop_back();
+        int dxm = px - simX, dym = py - simY;
+        Direction backDir = SOUTH;
+        for (int d = 0; d < 4; ++d)
+        {
+            if (dx[d] == dxm && dy[d] == dym)
+            {
+                backDir = Direction(d);
+                break;
+            }
+        }
+        turnTo(simDir, backDir);
+        simX = px;
+        simY = py;
+        return;
+    }
+    // nothing left
 }
 
 int main()
 {
-    srand(time(0));
+    srand((unsigned)time(NULL));
     RenderWindow window(VideoMode(COLS * CELL_SIZE, ROWS * CELL_SIZE), "Micromouse Simulator");
     Clock clock;
-
+    maze.assign(ROWS, vector<Cell>(COLS));
+    discoveredMaze.assign(ROWS, vector<Cell>(COLS));
     generateRandomMaze();
     resetSim();
-
     while (window.isOpen())
     {
-        Event event;
-        while (window.pollEvent(event))
+        Event e;
+        while (window.pollEvent(e))
         {
-            if (event.type == Event::Closed)
+            if (e.type == Event::Closed)
                 window.close();
-            if (event.type == Event::KeyPressed)
+            if (e.type == Event::KeyPressed)
             {
-                if (event.key.code == Keyboard::Space)
+                if (e.key.code == Keyboard::Space)
                     simulateStep();
-                else if (event.key.code == Keyboard::A)
+                else if (e.key.code == Keyboard::A)
                     autoMode = !autoMode;
-                else if (event.key.code == Keyboard::R)
+                else if (e.key.code == Keyboard::R)
                 {
                     generateRandomMaze();
                     resetSim();
                 }
             }
         }
-
         if (autoMode && clock.getElapsedTime().asMilliseconds() > 300)
         {
             simulateStep();
             clock.restart();
         }
-
         window.clear(Color::White);
         drawMaze(window);
         window.display();
     }
-
     return 0;
 }
